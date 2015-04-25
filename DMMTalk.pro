@@ -1,6 +1,6 @@
-update=4/19/2015 7:03:16 PM
+update=Sat 25 Apr 2015 07:07:54 PM EDT
 version=1
-last_client=kicad
+last_client=eeschema
 [cvpcb]
 version=1
 NetIExt=net
@@ -29,7 +29,12 @@ ModuleOutlineThickness=0.150000000000
 version=1
 [eeschema]
 version=1
-LibDir=
+LibDir=../library/library
+NetFmtName=
+RptD_X=0
+RptD_Y=100
+RptLab=1
+LabSize=60
 [eeschema/libraries]
 LibName1=power
 LibName2=device
