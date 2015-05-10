@@ -1,0 +1,15 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP AT90S2323-P
+D AT90S/LS2323, PDIP8, 2k Flash, 128B SRAM, 128B EEPROM
+K AVR 8bit Microcontroller ClassicAVR
+F http://www.atmel.com/Images/doc1004.pdf
+$ENDCMP
+#
+$CMP MX25L4006E
+D 3V, 4M-BIT [x 1/x 2] CMOS SERIAL FLASH MEMORY
+K SPI serial memory flash
+F http://www.macronix.com/Lists/DataSheet/Attachments/1781/MX25L4006E,%203V,%204Mb,%20v1.6.pdf
+$ENDCMP
+#
+#End Doc Library

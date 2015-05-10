@@ -1,4 +1,4 @@
-update=Wed 06 May 2015 08:54:17 PM EDT
+update=Sat 09 May 2015 04:19:46 PM EDT
 version=1
 last_client=kicad
 [cvpcb]
@@ -45,7 +45,7 @@ LibName31=msp430
 version=1
 PageLayoutDescrFile=
 LastNetListRead=MSP430G2553-with-dac.net
-UseCmpFile=0
+UseCmpFile=1
 PadDrill=0.6
 PadDrillOvalY=0.6
 PadSizeH=1.5
