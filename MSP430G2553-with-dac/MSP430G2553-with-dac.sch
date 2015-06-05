@@ -1,4 +1,5 @@
 EESchema Schematic File Version 2
+LIBS:MSP430G2553-with-dac-rescue
 LIBS:DMMTalk
 LIBS:power
 LIBS:device
@@ -519,7 +520,7 @@ F 3 "" H 1000 5500 60  0000 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L Q_PNP_CBE Q1
+L Q_PNP_CBE-RESCUE-MSP430G2553-with-dac Q1
 U 1 1 554B34B6
 P 4500 4950
 F 0 "Q1" H 4800 5000 50  0000 R CNN
