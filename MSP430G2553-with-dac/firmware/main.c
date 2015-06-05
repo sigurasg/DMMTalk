@@ -24,7 +24,7 @@ uint32_t GetTime() {
 	break;
   }
 
-  return (uint32_t)hi << 16 | lo;
+  return ((uint32_t)hi << 16) | lo;
 }
 
 struct Timer {
@@ -121,7 +121,29 @@ typedef struct RGB {
 RGB led = { 128, 128, 128 };
 RGB save;
 uint8_t mode = 0;
-uint8_t interrupt_count = 0;
+
+static void BlinkLEDs(struct Timer* t);
+
+struct Timer led_timer = { 0, BlinkLEDs, nullptr };
+
+// Blink the LEDs 50 times/second.
+const uint32_t period = 16000000 / 50;
+
+static uint8_t state;
+static uint8_t mask[3] = { RLED, GLED, BLED };
+static uint32_t periods[4] = { 127 * 1250ul, 1250, 1250, 127 * 1250ul };
+
+static void BlinkLEDs(struct Timer* t) {
+  if (state == 0) {
+    P2OUT &= ~(RLED | GLED | BLED);
+  } else {
+      P2OUT |= mask[state - 1];
+  }
+  t->time += periods[state++];
+  if (state == 4)
+    state = 0;
+  Schedule(t);
+}
 
 static void ScheduleNextTimerInterrupt() {
   if (!first || (first->time >> 16) > rolls) {
@@ -161,7 +183,19 @@ ISR(TIMER0_A0, TA0CCR0_INT) {
   ScheduleNextTimerInterrupt();
 }
 
+void DebounceButton(struct Timer* timer) {
+  // Re-enable the button interrupt.
+  P2IE |= BUTTON;
+}
+
+struct Timer debounce_timer = { 0, DebounceButton };
+
 void OnButtonPress() {
+  P2IE &= ~BUTTON;
+  // 10ms de-bounce.
+  debounce_timer.time = GetTime() + 160000;
+  Schedule(&debounce_timer);
+
   switch (mode) {
     case 0:
       save = led;
@@ -249,15 +283,6 @@ ISR(PORT2, PORT2INT) {
   else if (ports & (Q_A | Q_B))
     OnEncoderInterrupt(ports & (Q_A | Q_B));
 }
-
-void BlinkLEDs(struct Timer* t) {
-  P2OUT ^= (RLED | GLED | BLED);
-
-  t->time += 8000000;
-  Schedule(t);
-}
-
-struct Timer led_timer = { 0, BlinkLEDs, nullptr };
 
 int main() {
   // Disable the watchdog.
