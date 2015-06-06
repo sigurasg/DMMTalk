@@ -9,65 +9,9 @@
 #include <isr_compat.h>
 #include <stdint.h>
 
+#include "timer.h"
+
 #define nullptr 0
-
-typedef int32_t ticks_t;
-// The low part of ticks is the TA0R register.
-static int16_t ticks_hi = 0;
-
-ticks_t GetTicks() {
-  int16_t hi;
-  uint16_t lo;
-  for (;;) {
-      hi = ticks_hi;
-      lo = TA0R;
-
-      if (hi == ticks_hi)
-	break;
-  }
-
-  return ((ticks_t)hi << 16) | lo;
-}
-
-struct Timer {
-  ticks_t ticks;
-  void (*exec)(struct Timer*);
-  struct Timer* next;
-};
-
-struct Timer* first;
-
-void Schedule(struct Timer* t) {
-  __istate_t state = __get_interrupt_state();
-  __disable_interrupt();
-
-  if (!first || (t->ticks - first->ticks) < 0) {
-      t->next = first;
-      first = t;
-
-      // The first-in-line timer changed. It may be scheduled for the past,
-      // so fire an interrupt to potentially execute and re-schedule.
-      TA0CCTL0 |= CCIFG;
-  } else {
-      struct Timer* curr = first;
-      // Pre: t->time >= first->time.
-      for (; curr->next; curr = curr ->next) {
-	  if ((t->ticks - curr->next->ticks) < 0) {
-	    t->next = curr->next;
-	    curr->next = t;
-	    curr = nullptr;
-	    break;
-	  }
-      }
-
-      if (curr != nullptr) {
-	  t->next = nullptr;
-	  curr->next = t;
-      }
-  }
-
-  __set_interrupt_state (state);
-}
 
 // Hardware pins.
 #define Q_A BIT2
@@ -127,7 +71,7 @@ typedef struct RGB {
 RGB led = { 128, 127, 127, 127 };
 uint8_t mode = 0;
 
-static void BlinkLEDs(struct Timer* t);
+static void PWMLEDs(struct Timer* t);
 struct LEDTimerSchedule {
   // The current state 0-3.
   uint8_t state;
@@ -142,7 +86,7 @@ struct LEDTimerSchedule next_led_schedule = {
     { RLED | GLED | BLED, 0 },
     { 1250Ul * 127, 1250Ul * 128 }
 };
-struct Timer led_timer = { 0, BlinkLEDs, nullptr };
+struct Timer led_timer = { 0, PWMLEDs, nullptr };
 
 // Blink the LEDs 50 times/second.
 const uint32_t period = 16000000 / 50;
@@ -192,7 +136,7 @@ static void SetLEDs(uint8_t mode, const RGB* led) {
   next_led_schedule = sch;
 }
 
-static void BlinkLEDs(struct Timer* t) {
+static void PWMLEDs(struct Timer* t) {
   uint8_t mask = led_schedule.masks[led_schedule.state];
   P2OUT &= ~(RLED | GLED | BLED);
   P2OUT |= (RLED | GLED | BLED) & ~mask;
@@ -205,45 +149,13 @@ static void BlinkLEDs(struct Timer* t) {
   }
 }
 
-static void ScheduleNextTimerInterrupt() {
-  int16_t first_hi = first->ticks >> 16;
-  if (!first || (first_hi - ticks_hi) > 0) {
-      // Disable the CCR0 interrupt for now.
-      TA0CCTL0 &= ~CCIE;
-      return;
-  }
-
-  if ((first_hi - ticks_hi) == 0) {
-      // The first task is in the immediate future, schedule a timer to run it.
-      TA0CCTL0 |= CCIE;
-      TA0CCR0 = first->ticks & 0xFFFF;
-      if (TAR > TA0CCR0)
-	TA0CCTL0 |= CCIFG;
-  } else {
-      // The first task is in the past, schedule an immediate interrupt.
-      TA0CCTL0 |= CCIE | CCIFG;
-  }
-}
-
 ISR(TIMER0_A1, TA0_INT) {
-  if (TAIV == TA0IV_TAIFG) {
-    // Overflow interrupt.
-    ++ticks_hi;
-
-    ScheduleNextTimerInterrupt();
-  }
+  if (TAIV == TA0IV_TAIFG)
+    OnTimerOverflow();
 }
 
 ISR(TIMER0_A0, TA0CCR0_INT) {
-  ticks_t time = ((ticks_t)ticks_hi << 16) | TA0R;
-
-  while (first && (time - first->ticks) >= 0) {
-    struct Timer* curr = first;
-    first = first->next;
-    curr->exec(curr);
-  }
-
-  ScheduleNextTimerInterrupt();
+  OnTimerInterrupt();
 }
 
 void DebounceButton(struct Timer* timer) {
