@@ -22,6 +22,7 @@
 #define RLED BIT5
 #define GLED BIT6
 #define BLED BIT7
+#define LEDMASK (RLED | GLED | BLED)
 
 void InitClock() {
   // 16MHz DCO for main clock.
@@ -38,9 +39,9 @@ void InitTimer0() {
 }
 
 void InitLEDPort() {
-  P2SEL	&= ~(RLED | GLED | BLED);
-  P2DIR |= RLED | GLED | BLED;
-  P2OUT |= RLED | GLED | BLED;
+  P2SEL	&= ~LEDMASK;
+  P2DIR |= LEDMASK;
+  P2OUT |= LEDMASK;
 }
 
 void InitButtons() {
@@ -83,13 +84,10 @@ struct LEDTimerSchedule {
 struct LEDTimerSchedule led_schedule;
 struct LEDTimerSchedule next_led_schedule = {
     0,
-    { RLED | GLED | BLED, 0 },
-    { 1250Ul * 127, 1250Ul * 128 }
+    { LEDMASK, 0 },
+    { 625Ul * 127, 625Ul * 128 }
 };
 struct Timer led_timer = { 0, PWMLEDs, nullptr };
-
-// Blink the LEDs 50 times/second.
-const uint32_t period = 16000000 / 50;
 
 static void SetLEDs(uint8_t mode, const RGB* led) {
   uint8_t values[3] = {0};
@@ -125,21 +123,20 @@ static void SetLEDs(uint8_t mode, const RGB* led) {
   for (i = 0; i < 3; ++i) {
       if (values[i]) {
 	  if (values[i] != max) {
-	    sch.delays[j] = 1250ul * (values[i] - max);
+	    sch.delays[j] = 625ul * (values[i] - max);
 	    sch.masks[j++] = masks[i];
 	    max = values[i];
 	  }
       }
   }
-  sch.delays[j] = 1250ul * (256ul - max);
+  sch.delays[j] = 625ul * (256ul - max);
 
   next_led_schedule = sch;
 }
 
 static void PWMLEDs(struct Timer* t) {
   uint8_t mask = led_schedule.masks[led_schedule.state];
-  P2OUT &= ~(RLED | GLED | BLED);
-  P2OUT |= (RLED | GLED | BLED) & ~mask;
+  P2OUT = (P2OUT & ~LEDMASK) | (LEDMASK & ~mask);
   t->ticks += led_schedule.delays[led_schedule.state++];
   Schedule(t);
 
