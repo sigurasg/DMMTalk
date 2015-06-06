@@ -13,7 +13,9 @@
 
 static uint16_t rolls = 0;
 
-uint32_t GetTime() {
+typedef int32_t time_t;
+
+time_t GetTime() {
   uint16_t hi;
   uint16_t lo;
   for (;;) {
@@ -24,11 +26,11 @@ uint32_t GetTime() {
 	break;
   }
 
-  return ((uint32_t)hi << 16) | lo;
+  return ((time_t)hi << 16) | lo;
 }
 
 struct Timer {
-  uint32_t time;
+  time_t time;
   void (*exec)(struct Timer*);
   struct Timer* next;
 };
@@ -110,19 +112,18 @@ void InitButtons() {
   P2IES &= ~BUTTON;
 
   // And for quadrature changes.
-  P2IES = (P2IES & (Q_A | Q_B)) |
-	  (((P2IN & (Q_A | Q_B)) ^ (Q_A | Q_B)));
+  P2IES = (P2IES & ~(Q_A | Q_B)) | (P2IN & (Q_A | Q_B));
 
   // Enable the port interrupts.
   P2IE |= (Q_A | Q_B | BUTTON);
 }
 
 typedef struct RGB {
+  uint8_t intens;
   uint8_t r, g, b;
 } RGB;
 
-RGB led = { 128, 128, 128 };
-RGB save;
+RGB led = { 128, 127, 127, 127 };
 uint8_t mode = 0;
 
 static void BlinkLEDs(struct Timer* t);
@@ -134,7 +135,8 @@ struct LEDTimerSchedule {
   // The delay to the next state.
   uint32_t delays[4];
 };
-struct LEDTimerSchedule led_schedule = {
+struct LEDTimerSchedule led_schedule;
+struct LEDTimerSchedule next_led_schedule = {
     0,
     { RLED | GLED | BLED, 0 },
     { 1250Ul * 127, 1250Ul * 128 }
@@ -144,11 +146,18 @@ struct Timer led_timer = { 0, BlinkLEDs, nullptr };
 // Blink the LEDs 50 times/second.
 const uint32_t period = 16000000 / 50;
 
-static void SetLEDs(uint8_t r, uint8_t g, uint8_t b) {
-  uint8_t values[3] = { r, g, b };
+static void SetLEDs(uint8_t mode, const RGB* led) {
+  uint8_t values[3] = {0};
   uint8_t masks[3] = { RLED, GLED, BLED };
   uint8_t i, j, max;
   struct LEDTimerSchedule sch = {0};
+
+  if (mode == 0 || mode == 1)
+    values[0] = ((uint16_t)led->intens * led->r) >> 8;
+  if (mode == 0 || mode == 2)
+    values[1] = ((uint16_t)led->intens * led->g) >> 8;
+  if (mode == 0 || mode == 3)
+    values[2] = ((uint16_t)led->intens * led->b) >> 8;
 
   for (i = 0; i < 2; ++i) {
       for (j = i; j < 3; ++j) {
@@ -179,7 +188,7 @@ static void SetLEDs(uint8_t r, uint8_t g, uint8_t b) {
   }
   sch.delays[j] = 1250ul * (256ul - max);
 
-  led_schedule = sch;
+  next_led_schedule = sch;
 }
 
 static void BlinkLEDs(struct Timer* t) {
@@ -189,8 +198,10 @@ static void BlinkLEDs(struct Timer* t) {
   t->time += led_schedule.delays[led_schedule.state++];
   Schedule(t);
 
-  if (mask == 0)
-    led_schedule.state = 0;
+  if (mask == 0) {
+      led_schedule = next_led_schedule;
+      led_schedule.state = 0;
+  }
 }
 
 static void ScheduleNextTimerInterrupt() {
@@ -244,85 +255,86 @@ void OnButtonPress() {
   debounce_timer.time = GetTime() + 1600000;
   Schedule(&debounce_timer);
 
-  switch (mode) {
-    case 0:
-      save = led;
-      led.g = led.b = 0;
-      break;
-
-    case 1:
-      save.r = led.r;
-      led.r = 0;
-      led.g = save.g;
-      break;
-
-    case 2:
-      save.g = led.g;
-      led.g = 0;
-      led.b = save.b;
-      break;
-
-    case 3:
-      save.b = led.b;
-      led = save;
-      break;
-  }
-
-  SetLEDs(led.r, led.g, led.b);
 
   ++mode;
   if (mode == 4)
     mode = 0;
+
+  SetLEDs(mode, &led);
 }
 
 static const int8_t dir[16] = {
-    0,   // 0b0000
-    -1,  // 0b0001
-    1,   // 0b0010
-    0,   // 0b0011
-    1,   // 0b0100
-    0,   // 0b0101
-    0,   // 0b0110
-    -1,  // 0b0111
-    -1,  // 0b1000
-    0,   // 0b1001
-    0,   // 0b1010
-    1,   // 0b1011
-    0,   // 0b1100
-    1,   // 0b1101
-    -1,  // 0b1110
-    0,   // 0b1111
+    0,   // 00 00
+    -1,  // 00 01
+    1,   // 00 10
+    0,   // 00 11
+    1,   // 01 00
+    0,   // 01 01
+    0,   // 01 10
+    -1,  // 01 11
+    -1,  // 10 00
+    0,   // 10 01
+    0,   // 10 10
+    1,   // 10 11
+    0,   // 11 00
+    1,   // 11 01
+    -1,  // 11 10
+    0,   // 11 11
 };
 
-void OnEncoderInterrupt(uint8_t mask) {
+uint32_t pos = 0;
+uint32_t neg = 0;
+uint32_t zero = 0;
+
+static void Adjust(int adj, uint8_t* value) {
+  if (adj == -1 && *value == 0)
+    return;
+  if (adj == 1 && *value == 255)
+    return;
+  *value += adj;
+}
+
+static void OnEncoderInterrupt(uint8_t mask) {
   static uint8_t last_q = 0;
   uint8_t q = P2IN & (Q_A | Q_B);
 
   // Set up for the next quadrature change.
-  P2IES = (P2IES & (Q_A | Q_B)) | (q ^ (Q_A | Q_B));
+  P2IES = (P2IES & ~(Q_A | Q_B)) | q;
 
   int adj = dir[last_q | q];
-  last_q = q >> 2;
-
-
-  switch (mode) {
-    case 0:
-      led.r += adj;
-      led.g += adj;
-      led.b += adj;
+  switch (adj) {
+    case -1:
+      ++neg;
       break;
     case 1:
-      led.r += adj;
+      ++pos;
       break;
-    case 2:
-      led.g += adj;
-      break;
-    case 3:
-      led.b += adj;
+    case 0:
+      ++zero;
       break;
   }
 
-  SetLEDs(led.r, led.g, led.b);
+  last_q = q >> 2;
+
+  if (adj == 0)
+    return;
+
+  switch (mode) {
+    case 0:
+      Adjust(adj, &led.intens);
+      break;
+    case 1:
+      Adjust(adj, &led.r);
+      break;
+    case 2:
+      Adjust(adj, &led.g);
+      break;
+    case 3:
+      Adjust(adj, &led.b);
+      break;
+  }
+
+  SetLEDs(mode, &led);
 }
 
 ISR(PORT2, PORT2INT) {
