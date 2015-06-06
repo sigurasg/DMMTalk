@@ -231,7 +231,7 @@ ISR(TIMER0_A1, TA0_INT) {
 }
 
 ISR(TIMER0_A0, TA0CCR0_INT) {
-  uint32_t time = (uint32_t)rolls << 16 | TA0R;
+  time_t time = ((time_t)rolls << 16) | TA0R;
 
   while (first && time >= first->time) {
     struct Timer* curr = first;
