@@ -36,6 +36,7 @@ struct Timer {
 struct Timer* first;
 
 void Schedule(struct Timer* t) {
+  __istate_t state = __get_interrupt_state();
   __disable_interrupt();
 
   if (!first || t->time < first->time) {
@@ -49,7 +50,7 @@ void Schedule(struct Timer* t) {
       // Pre: t->time >= first->time.
       for (; curr->next; curr = curr ->next) {
 	  if (t->time < curr->next->time) {
-	    t->time = curr->next;
+	    t->next = curr->next;
 	    curr->next = t;
 	    curr = nullptr;
 	    break;
@@ -62,7 +63,7 @@ void Schedule(struct Timer* t) {
       }
   }
 
-  __enable_interrupt();
+  __set_interrupt_state (state);
 }
 
 // Hardware pins.
@@ -100,15 +101,17 @@ void InitButtons() {
   P2DIR &= ~(Q_A | Q_B | BUTTON);
   // Enable pulldown resistor for the button, and pullups
   // for the quadrature switches.
+  P2REN |= (Q_A | Q_B | BUTTON);
   P2OUT &= ~BUTTON;
   P2OUT |= Q_A | Q_B;
-  P2REN |= (Q_A | Q_B | BUTTON);
 
-  // Set up for interrupt on button high->low transitions.
-  P2IES |= BUTTON;
+  // Set up for interrupt on button low->high transition.
+  // The button is N/O, connected to VCC with a pulldown.
+  P2IES &= ~BUTTON;
 
   // And for quadrature changes.
-  P2IES |= (P2IN & (Q_A | Q_B)) ^ (Q_A | Q_B);
+  P2IES = (P2IES & (Q_A | Q_B)) |
+	  (((P2IN & (Q_A | Q_B)) ^ (Q_A | Q_B)));
 
   // Enable the port interrupts.
   P2IE |= (Q_A | Q_B | BUTTON);
@@ -123,26 +126,71 @@ RGB save;
 uint8_t mode = 0;
 
 static void BlinkLEDs(struct Timer* t);
-
+struct LEDTimerSchedule {
+  // The current state 0-3.
+  uint8_t state;
+  // Mask of the LEDs that are on at any stage, ends in a zero mask.
+  uint8_t masks[4];
+  // The delay to the next state.
+  uint32_t delays[4];
+};
+struct LEDTimerSchedule led_schedule = {
+    0,
+    { RLED | GLED | BLED, 0 },
+    { 1250Ul * 127, 1250Ul * 128 }
+};
 struct Timer led_timer = { 0, BlinkLEDs, nullptr };
 
 // Blink the LEDs 50 times/second.
 const uint32_t period = 16000000 / 50;
 
-static uint8_t state;
-static uint8_t mask[3] = { RLED, GLED, BLED };
-static uint32_t periods[4] = { 127 * 1250ul, 1250, 1250, 127 * 1250ul };
+static void SetLEDs(uint8_t r, uint8_t g, uint8_t b) {
+  uint8_t values[3] = { r, g, b };
+  uint8_t masks[3] = { RLED, GLED, BLED };
+  uint8_t i, j, max;
+  struct LEDTimerSchedule sch = {0};
+
+  for (i = 0; i < 2; ++i) {
+      for (j = i; j < 3; ++j) {
+	  if (values[i] > values[j]) {
+	      uint8_t tmp = values[i];
+	      values[i] = values[j];
+	      values[j] = tmp;
+	      tmp = masks[i];
+	      masks[i] = masks[j];
+	      masks[j] = tmp;
+	  }
+      }
+  }
+
+  masks[1] |= masks[2];
+  masks[0] |= masks[1];
+
+  j = 0;
+  max = 0;
+  for (i = 0; i < 3; ++i) {
+      if (values[i]) {
+	  if (values[i] != max) {
+	    sch.delays[j] = 1250ul * (values[i] - max);
+	    sch.masks[j++] = masks[i];
+	    max = values[i];
+	  }
+      }
+  }
+  sch.delays[j] = 1250ul * (256ul - max);
+
+  led_schedule = sch;
+}
 
 static void BlinkLEDs(struct Timer* t) {
-  if (state == 0) {
-    P2OUT &= ~(RLED | GLED | BLED);
-  } else {
-      P2OUT |= mask[state - 1];
-  }
-  t->time += periods[state++];
-  if (state == 4)
-    state = 0;
+  uint8_t mask = led_schedule.masks[led_schedule.state];
+  P2OUT &= ~(RLED | GLED | BLED);
+  P2OUT |= (RLED | GLED | BLED) & ~mask;
+  t->time += led_schedule.delays[led_schedule.state++];
   Schedule(t);
+
+  if (mask == 0)
+    led_schedule.state = 0;
 }
 
 static void ScheduleNextTimerInterrupt() {
@@ -192,8 +240,8 @@ struct Timer debounce_timer = { 0, DebounceButton };
 
 void OnButtonPress() {
   P2IE &= ~BUTTON;
-  // 10ms de-bounce.
-  debounce_timer.time = GetTime() + 160000;
+  // 100ms de-bounce.
+  debounce_timer.time = GetTime() + 1600000;
   Schedule(&debounce_timer);
 
   switch (mode) {
@@ -219,6 +267,8 @@ void OnButtonPress() {
       led = save;
       break;
   }
+
+  SetLEDs(led.r, led.g, led.b);
 
   ++mode;
   if (mode == 4)
@@ -249,7 +299,7 @@ void OnEncoderInterrupt(uint8_t mask) {
   uint8_t q = P2IN & (Q_A | Q_B);
 
   // Set up for the next quadrature change.
-  P2IES |=  q ^ (Q_A | Q_B);
+  P2IES = (P2IES & (Q_A | Q_B)) | (q ^ (Q_A | Q_B));
 
   int adj = dir[last_q | q];
   last_q = q >> 2;
@@ -271,6 +321,8 @@ void OnEncoderInterrupt(uint8_t mask) {
       led.b += adj;
       break;
   }
+
+  SetLEDs(led.r, led.g, led.b);
 }
 
 ISR(PORT2, PORT2INT) {
@@ -300,4 +352,6 @@ int main() {
 
   // LPM1 is just right, as it keeps the DCO going.
   LPM1;
+
+  return 0;
 }
