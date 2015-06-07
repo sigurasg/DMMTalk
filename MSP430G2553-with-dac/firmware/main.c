@@ -14,6 +14,9 @@
 #define nullptr 0
 
 // Hardware pins.
+#define RX BIT0
+#define TX BIT1
+
 #define Q_A BIT2
 #define Q_B BIT3
 #define BUTTON BIT4
@@ -146,13 +149,13 @@ static void PWMLEDs(struct Timer* t) {
   }
 }
 
+ISR(TIMER0_A0, TA0CCR0_INT) {
+  OnTimerInterrupt();
+}
+
 ISR(TIMER0_A1, TA0_INT) {
   if (TAIV == TA0IV_TAIFG)
     OnTimerOverflow();
-}
-
-ISR(TIMER0_A0, TA0CCR0_INT) {
-  OnTimerInterrupt();
 }
 
 void DebounceButton(struct Timer* timer) {
@@ -263,11 +266,55 @@ ISR(PORT2, PORT2INT) {
     OnEncoderInterrupt(ports & (Q_A | Q_B));
 }
 
+static void BitBangSerial(uint8_t character) {
+#define BIT_CYCLES (16000000ul/9600)
+  uint8_t bits;
+
+  __istate_t state = __get_interrupt_state();
+  __disable_interrupt();
+
+  // Set the output bit high.
+  P2DIR |= TX;
+
+  // Output the start bit.
+  P2OUT &= ~TX;
+  __delay_cycles(BIT_CYCLES);
+
+  for (bits = 0; bits < 8; ++bits) {
+      if (character & 0x1) {
+	  P2OUT |= TX;
+      } else {
+	  P2OUT &= ~TX;
+      }
+      character >>= 1;
+      __delay_cycles(BIT_CYCLES);
+  }
+
+  // Stop bit.
+  P2OUT |= TX;
+  __delay_cycles(BIT_CYCLES);
+
+  __set_interrupt_state (state);
+}
+
+void HelloWorld() {
+  const char* str;
+
+  for (;;) {
+      char* str = "Hello World!\r\n";
+      for (; *str; ++str)
+	BitBangSerial(*str);
+  }
+};
+
 int main() {
   // Disable the watchdog.
   WDTCTL = WDTPW | WDTHOLD;
 
   InitClock();
+
+  HelloWorld();
+
   InitTimer0();
   InitLEDPort();
   InitButtons();
