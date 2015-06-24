@@ -36,13 +36,13 @@ void InitClock() {
 void InitTimer0() {
   // Set timer0 up for regular interrupts.
   TA0CTL = TASSEL_2 |  // Use SMCLK.
-	   ID_0 |  // Divide by 1.
-	   MC_2 |  // Continuous mode.
-	   TAIE;  // Enable overflow interrupts.
+      ID_0 |  // Divide by 1.
+      MC_2 |  // Continuous mode.
+      TAIE;  // Enable overflow interrupts.
 }
 
 void InitLEDPort() {
-  P2SEL	&= ~LEDMASK;
+  P2SEL &= ~LEDMASK;
   P2DIR |= LEDMASK;
   P2OUT |= LEDMASK;
 }
@@ -85,37 +85,34 @@ struct LEDTimerSchedule {
   uint32_t delays[4];
 };
 struct LEDTimerSchedule led_schedule;
-struct LEDTimerSchedule next_led_schedule = {
-    0,
-    { LEDMASK, 0 },
-    { 625Ul * 127, 625Ul * 128 }
-};
+struct LEDTimerSchedule next_led_schedule = { 0, { LEDMASK, 0 }, { 625Ul * 127,
+    625Ul * 128 } };
 struct Timer led_timer = { 0, PWMLEDs, nullptr };
 
 static void SetLEDs(uint8_t mode, const RGB* led) {
-  uint8_t values[3] = {0};
+  uint8_t values[3] = { 0 };
   uint8_t masks[3] = { RLED, GLED, BLED };
   uint8_t i, j, max;
-  struct LEDTimerSchedule sch = {0};
+  struct LEDTimerSchedule sch = { 0 };
 
   if (mode == 0 || mode == 1)
-    values[0] = ((uint16_t)led->intens * led->r) >> 8;
+    values[0] = ((uint16_t) led->intens * led->r) >> 8;
   if (mode == 0 || mode == 2)
-    values[1] = ((uint16_t)led->intens * led->g) >> 8;
+    values[1] = ((uint16_t) led->intens * led->g) >> 8;
   if (mode == 0 || mode == 3)
-    values[2] = ((uint16_t)led->intens * led->b) >> 8;
+    values[2] = ((uint16_t) led->intens * led->b) >> 8;
 
   for (i = 0; i < 2; ++i) {
-      for (j = i; j < 3; ++j) {
-	  if (values[i] > values[j]) {
-	      uint8_t tmp = values[i];
-	      values[i] = values[j];
-	      values[j] = tmp;
-	      tmp = masks[i];
-	      masks[i] = masks[j];
-	      masks[j] = tmp;
-	  }
+    for (j = i; j < 3; ++j) {
+      if (values[i] > values[j]) {
+        uint8_t tmp = values[i];
+        values[i] = values[j];
+        values[j] = tmp;
+        tmp = masks[i];
+        masks[i] = masks[j];
+        masks[j] = tmp;
       }
+    }
   }
 
   masks[1] |= masks[2];
@@ -124,13 +121,13 @@ static void SetLEDs(uint8_t mode, const RGB* led) {
   j = 0;
   max = 0;
   for (i = 0; i < 3; ++i) {
-      if (values[i]) {
-	  if (values[i] != max) {
-	    sch.delays[j] = 625ul * (values[i] - max);
-	    sch.masks[j++] = masks[i];
-	    max = values[i];
-	  }
+    if (values[i]) {
+      if (values[i] != max) {
+        sch.delays[j] = 625ul * (values[i] - max);
+        sch.masks[j++] = masks[i];
+        max = values[i];
       }
+    }
   }
   sch.delays[j] = 625ul * (256ul - max);
 
@@ -144,8 +141,8 @@ static void PWMLEDs(struct Timer* t) {
   Schedule(t);
 
   if (mask == 0) {
-      led_schedule = next_led_schedule;
-      led_schedule.state = 0;
+    led_schedule = next_led_schedule;
+    led_schedule.state = 0;
   }
 }
 
@@ -181,8 +178,7 @@ void OnButtonPress() {
   Schedule(&debounce_timer);
 }
 
-static const int8_t dir[16] = {
-    0,   // 00 00
+static const int8_t dir[16] = { 0,   // 00 00
     -1,  // 00 01
     1,   // 00 10
     0,   // 00 11
@@ -198,7 +194,7 @@ static const int8_t dir[16] = {
     1,   // 11 01
     -1,  // 11 10
     0,   // 11 11
-};
+    };
 
 uint32_t pos = 0;
 uint32_t neg = 0;
@@ -266,8 +262,59 @@ ISR(PORT2, PORT2INT) {
     OnEncoderInterrupt(ports & (Q_A | Q_B));
 }
 
-static void BitBangSerial(uint8_t character) {
 #define BIT_CYCLES (16000000ul/9600)
+static void TimerSerial(uint8_t character) {
+  uint8_t bits;
+  uint16_t now;
+
+  __istate_t state = __get_interrupt_state();
+  __disable_interrupt();
+
+  // Set timer1 up for continuous up counting.
+  TA1CTL = TASSEL_2 |  // Use SMCLK.
+      ID_0 |  // Divide by 1.
+      MC_2;  // Continuous mode.
+
+  // Set the timer output bit high.
+  TA1CCTL1 = OUTMOD_0 | OUT;
+
+  // Setup P2.1 for outputting TA1.1.
+  P2OUT |= TX;
+  P2SEL |= TX;
+  P2SEL2 &= ~TX;
+  P2DIR |= TX;
+
+  // Wait a bit time - then set the output low to begin the start bit.
+  now = TA1R;
+  TA1CCR1 = now + BIT_CYCLES;
+  TA1CCTL1 = OUTMOD_5 | OUT;
+
+  while ((TA1CCTL1 & CCIFG) == 0)
+    ;
+
+  for (bits = 0; bits < 8; ++bits) {
+    TA1CCR1 += BIT_CYCLES;
+    if (character & 0x1) {
+      TA1CCTL1 = OUTMOD_1;
+    } else {
+      TA1CCTL1 = OUTMOD_5;
+    }
+    character >>= 1;
+    // Wait a bit time.
+    while ((TA1CCTL1 & CCIFG) == 0)
+      ;
+  }
+
+  // Stop bit.
+  TA1CCR1 += BIT_CYCLES;
+  TA1CCTL1 = OUTMOD_1;
+  while ((TA1CCTL1 & CCIFG) == 0)
+    ;
+
+  __set_interrupt_state(state);
+}
+
+static void BitBangSerial(uint8_t character) {
   uint8_t bits;
 
   __istate_t state = __get_interrupt_state();
@@ -281,31 +328,36 @@ static void BitBangSerial(uint8_t character) {
   __delay_cycles(BIT_CYCLES);
 
   for (bits = 0; bits < 8; ++bits) {
-      if (character & 0x1) {
-	  P2OUT |= TX;
-      } else {
-	  P2OUT &= ~TX;
-      }
-      character >>= 1;
-      __delay_cycles(BIT_CYCLES);
+    if (character & 0x1) {
+      P2OUT |= TX;
+    } else {
+      P2OUT &= ~TX;
+    }
+    character >>= 1;
+    __delay_cycles(BIT_CYCLES);
   }
 
   // Stop bit.
   P2OUT |= TX;
   __delay_cycles(BIT_CYCLES);
 
-  __set_interrupt_state (state);
+  __set_interrupt_state(state);
 }
 
 void HelloWorld() {
   const char* str;
 
   for (;;) {
-      char* str = "Hello World!\r\n";
-      for (; *str; ++str)
-	BitBangSerial(*str);
+    char* str = "Hello World!\r\n";
+    for (; *str; ++str)
+#if 0
+      BitBangSerial(*str);
+#else
+     TimerSerial(*str);
+#endif
   }
-};
+}
+;
 
 int main() {
   // Disable the watchdog.
