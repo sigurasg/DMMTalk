@@ -357,7 +357,6 @@ void HelloWorld() {
 #endif
   }
 }
-;
 
 int main() {
   // Disable the watchdog.
