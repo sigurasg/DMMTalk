@@ -10,27 +10,8 @@
 #include <stdint.h>
 
 #include "timer.h"
-
-#define nullptr 0
-
-// Port 2
-// @{
-
-// Hardware pins.
-#define RX BIT0
-#define TX BIT1
-
-#define Q_A BIT2
-#define Q_B BIT3
-#define BUTTON BIT4
-
-// The LEDs are inverted, pull down to turn LEDs on.
-#define RLED BIT5
-#define GLED BIT6
-#define BLED BIT7
-#define LEDMASK (RLED | GLED | BLED)
-
-// @}
+#include "ports.h"
+#include "led_pwm.h"
 
 void InitClock() {
   // 16MHz DCO for main clock.
@@ -55,12 +36,6 @@ void InitTimer1() {
       MC_2;   // Continuous mode.
 }
 
-void InitLEDPort() {
-  P2SEL &= ~LEDMASK;
-  P2DIR |= LEDMASK;
-  P2OUT |= LEDMASK;
-}
-
 void InitButtons() {
   // Button and quadrature switches are inputs.
   P2DIR &= ~(Q_A | Q_B | BUTTON);
@@ -81,85 +56,6 @@ void InitButtons() {
   P2IE |= (Q_A | Q_B | BUTTON);
 }
 
-typedef struct RGB {
-  uint8_t intens;
-  uint8_t r, g, b;
-} RGB;
-
-RGB led = { 128, 127, 127, 127 };
-uint8_t mode = 0;
-
-static void PWMLEDs(struct Timer* t);
-struct LEDTimerSchedule {
-  // The current state 0-3.
-  uint8_t state;
-  // Mask of the LEDs that are on at any stage, ends in a zero mask.
-  uint8_t masks[4];
-  // The delay to the next state.
-  uint32_t delays[4];
-};
-struct LEDTimerSchedule led_schedule;
-struct LEDTimerSchedule next_led_schedule = { 0, { LEDMASK, 0 }, { 625Ul * 127,
-    625Ul * 128 } };
-struct Timer led_timer = { 0, PWMLEDs, nullptr };
-
-static void SetLEDs(uint8_t mode, const RGB* led) {
-  uint8_t values[3] = { 0 };
-  uint8_t masks[3] = { RLED, GLED, BLED };
-  uint8_t i, j, max;
-  struct LEDTimerSchedule sch = { 0 };
-
-  if (mode == 0 || mode == 1)
-    values[0] = ((uint16_t) led->intens * led->r) >> 8;
-  if (mode == 0 || mode == 2)
-    values[1] = ((uint16_t) led->intens * led->g) >> 8;
-  if (mode == 0 || mode == 3)
-    values[2] = ((uint16_t) led->intens * led->b) >> 8;
-
-  for (i = 0; i < 2; ++i) {
-    for (j = i; j < 3; ++j) {
-      if (values[i] > values[j]) {
-        uint8_t tmp = values[i];
-        values[i] = values[j];
-        values[j] = tmp;
-        tmp = masks[i];
-        masks[i] = masks[j];
-        masks[j] = tmp;
-      }
-    }
-  }
-
-  masks[1] |= masks[2];
-  masks[0] |= masks[1];
-
-  j = 0;
-  max = 0;
-  for (i = 0; i < 3; ++i) {
-    if (values[i]) {
-      if (values[i] != max) {
-        sch.delays[j] = 625ul * (values[i] - max);
-        sch.masks[j++] = masks[i];
-        max = values[i];
-      }
-    }
-  }
-  sch.delays[j] = 625ul * (256ul - max);
-
-  next_led_schedule = sch;
-}
-
-static void PWMLEDs(struct Timer* t) {
-  uint8_t mask = led_schedule.masks[led_schedule.state];
-  P2OUT = (P2OUT & ~LEDMASK) | (LEDMASK & ~mask);
-  t->ticks += led_schedule.delays[led_schedule.state++];
-  Schedule(t);
-
-  if (mask == 0) {
-    led_schedule = next_led_schedule;
-    led_schedule.state = 0;
-  }
-}
-
 ISR(TIMER0_A0, TA0CCR0_INT) {
   OnTimerInterrupt();
 }
@@ -168,6 +64,9 @@ ISR(TIMER0_A1, TA0_INT) {
   if (TAIV == TA0IV_TAIFG)
     OnTimerOverflow();
 }
+
+static RGB led = { 128, 127, 127, 127 };
+static uint8_t mode = 0;
 
 void DebounceButton(struct Timer* timer) {
   // Re-enable the button interrupt.
@@ -364,10 +263,9 @@ int main() {
 
   InitClock();
   InitTimer0();
-  InitLEDPort();
   InitButtons();
 
-  Schedule(&led_timer);
+  InitLEDPWM();
 
   // Enable interrupts and go to sleep.
   __enable_interrupt();
