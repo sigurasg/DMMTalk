@@ -13,6 +13,9 @@
 
 #define nullptr 0
 
+// Port 2
+// @{
+
 // Hardware pins.
 #define RX BIT0
 #define TX BIT1
@@ -27,18 +30,29 @@
 #define BLED BIT7
 #define LEDMASK (RLED | GLED | BLED)
 
+// @}
+
 void InitClock() {
   // 16MHz DCO for main clock.
   BCSCTL1 = CALBC1_16MHZ;
   DCOCTL = CALDCO_16MHZ;
 }
 
+// Timer 0 is used for the timer service.
 void InitTimer0() {
   // Set timer0 up for regular interrupts.
   TA0CTL = TASSEL_2 |  // Use SMCLK.
       ID_0 |  // Divide by 1.
       MC_2 |  // Continuous mode.
       TAIE;  // Enable overflow interrupts.
+}
+
+// Timer 1 is used for soft serial in/out.
+void InitTimer1() {
+  // Set timer0 up for regular interrupts.
+  TA1CTL = TASSEL_2 |  // Use SMCLK.
+      ID_0 |  // Divide by 1.
+      MC_2;   // Continuous mode.
 }
 
 void InitLEDPort() {
@@ -344,28 +358,11 @@ static void BitBangSerial(uint8_t character) {
   __set_interrupt_state(state);
 }
 
-void HelloWorld() {
-  const char* str;
-
-  for (;;) {
-    char* str = "Hello World!\r\n";
-    for (; *str; ++str)
-#if 0
-      BitBangSerial(*str);
-#else
-     TimerSerial(*str);
-#endif
-  }
-}
-
 int main() {
   // Disable the watchdog.
   WDTCTL = WDTPW | WDTHOLD;
 
   InitClock();
-
-  HelloWorld();
-
   InitTimer0();
   InitLEDPort();
   InitButtons();
