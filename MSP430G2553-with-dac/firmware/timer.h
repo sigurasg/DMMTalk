@@ -18,10 +18,8 @@ struct Timer {
   struct Timer* next;
 };
 
+extern void InitTimer();
 extern ticks_t GetTicks();
 extern void Schedule(struct Timer* t);
-
-extern void OnTimerInterrupt();
-extern void OnTimerOverflow();
 
 #endif /* TIMER_H_ */

@@ -62,6 +62,15 @@ void Schedule(struct Timer* t) {
   __set_interrupt_state (state);
 }
 
+void InitTimer() {
+  // Timer 0 is used for the timer service,
+  // set it up for regular interrupts.
+  TA0CTL = TASSEL_2 |  // Use SMCLK.
+      ID_0 |  // Divide by 1.
+      MC_2 |  // Continuous mode.
+      TAIE;  // Enable overflow interrupts.
+}
+
 static void ScheduleNextTimerInterrupt() {
   int16_t first_hi = first->ticks >> 16;
   if (!first || (first_hi - ticks_hi) > 0) {
@@ -82,14 +91,14 @@ static void ScheduleNextTimerInterrupt() {
   }
 }
 
-void OnTimerOverflow() {
+static void OnTimerOverflow() {
   // Overflow interrupt.
   ++ticks_hi;
 
   ScheduleNextTimerInterrupt();
 }
 
-void OnTimerInterrupt() {
+static void OnTimerInterrupt() {
   ticks_t time = ((ticks_t)ticks_hi << 16) | TA0R;
 
   while (first && (time - first->ticks) >= 0) {
@@ -99,4 +108,13 @@ void OnTimerInterrupt() {
   }
 
   ScheduleNextTimerInterrupt();
+}
+
+ISR(TIMER0_A0, TA0CCR0_INT) {
+  OnTimerInterrupt();
+}
+
+ISR(TIMER0_A1, TA0_INT) {
+  if (TAIV == TA0IV_TAIFG)
+    OnTimerOverflow();
 }
