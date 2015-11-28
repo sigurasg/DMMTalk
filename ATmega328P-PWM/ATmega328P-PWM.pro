@@ -1,4 +1,4 @@
-update=Sun 22 Nov 2015 01:23:02 PM EST
+update=Sat 28 Nov 2015 03:42:05 PM EST
 version=1
 last_client=kicad
 [pcbnew]
@@ -60,4 +60,3 @@ LibName28=contrib
 LibName29=valves
 LibName30=powerint
 LibName31=Power_Management
-LibName32=/home/siggi/src/DMMTalk/DMMTalk
