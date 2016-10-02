@@ -1,4 +1,4 @@
-update=Sat 28 Nov 2015 03:42:05 PM EST
+update=Tue 30 Aug 2016 07:45:45 PM EDT
 version=1
 last_client=kicad
 [pcbnew]
@@ -60,3 +60,13 @@ LibName28=contrib
 LibName29=valves
 LibName30=powerint
 LibName31=Power_Management
+[schematic_editor]
+version=1
+PageLayoutDescrFile=
+PlotDirectoryName=
+SubpartIdSeparator=0
+SubpartFirstId=65
+NetFmtName=Pcbnew
+SpiceForceRefPrefix=0
+SpiceUseNetNumbers=0
+LabSize=60
